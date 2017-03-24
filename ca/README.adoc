@@ -1,0 +1,40 @@
+
+[source,sh]
+----
+cd ca
+chmod 700 .
+# optionally remove all files from previous attempts
+rm -Rf certs private newcerts index* serial* *.pem *.csr
+
+mkdir certs private newcerts
+
+# Create some ancillary files
+echo 1000 > serial
+touch index.txt
+
+# The CA
+cn="ca.local"
+openssl req -new -x509 -days 365 -config openssl.cnf -extensions v3_ca \
+  -nodes \
+  -subj "/CN=${cn}" \
+  -keyout private/${cn}-key.pem -out certs/${cn}-cert.pem
+
+
+# The openldap cert
+cn="openldap.local"
+openssl req -new -days 365 \
+  -nodes \
+  -subj "/CN=${cn}" \
+  -out ${cn}.csr -keyout private/${cn}-key.pem -config openssl.cnf
+openssl ca -batch -out certs/${cn}-cert.pem -days 365 -config openssl.cnf -infiles ${cn}.csr
+
+# The WildFly cert
+cn="wildfly.local"
+openssl req -new -days 365 \
+  -nodes \
+  -subj "/CN=${cn}" \
+  -out ${cn}.csr -keyout private/${cn}-key.pem -config openssl.cnf
+openssl ca -batch -out certs/${cn}-cert.pem -days 365 -config openssl.cnf -infiles ${cn}.csr
+
+----
+
