@@ -1,3 +1,13 @@
+# keys and certs
+/ca/index.*
+/ca/serial*
+/ca/certs
+/ca/newcerts
+/ca/private
+/keytool
+*.csr
+*.pem
+
 # Maven
 target/
 pom.xml.tag
