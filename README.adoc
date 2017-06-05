@@ -150,7 +150,7 @@ git clone https://github.com/wildfly/wildfly.git
 cd wildfly
 # reset to a revision known to reproduce JBEAP-4439
 git reset --hard 70315eaba38d8be73a6154eac4ab5b8a326574c0
-mvn clean install -DskipTests
+mvn clean install -DskipTests -Denforcer.skip -Dcheckstyle-skip
 cd dist/target/wildfly-11.0.0.Beta1-SNAPSHOT
 
 cp -t standalone/configuration "${jbeap4439Dir}/wildfly-11.0.0.Beta1-SNAPSHOT-70315ea/standalone/configuration/standalone.xml"
@@ -175,7 +175,7 @@ echo "$ldif" | ldapmodify -Y EXTERNAL -H ldapi:///
 systemctl restart slapd
 
 
-openssl s_client -showcerts -connect localhost:636 -cert ca/wildfly.local-cert.pem -key ca/private/wildfly.local-key.pem -CAfile ca/cacert.pem
+openssl s_client -showcerts -connect localhost:636 -cert ca/certs/wildfly.local-cert.pem -key ca/private/wildfly.local-key.pem -CAfile ca/certs/ca.local-cert.pem
 ----
 
 Start WildFly again
