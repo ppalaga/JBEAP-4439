@@ -1,107 +1,19 @@
-= JBEAP-4439 reproducer utilities
+= JBEAP-4439 alias WFCORE-2647 reproducer utilities
 
 == Setup the Certificate Authority (CA)
 
 Install OpenSSL and follow link:ca/README.adoc[ca/README.adoc]
 
-== Install and configure OpenLdap
+== Create a NSS store
 
-[source,sh]
-----
-sudo su
-cd JBEAP-4439
+Follow link:nss.adoc[nss.adoc]
 
-# optionally clean the previous attempts
-systemctl stop slapd
-# dnf -y remove openldap-servers openldap-clients
-rm -Rf /etc/openldap/*
-rm -Rf /var/lib/ldap/*
+== LDAP Servers
 
-dnf -y reinstall openldap-servers openldap-clients
+Install and configure *one* of the LDAP Servers
 
-# or install
-# dnf -y install openldap-servers openldap-clients
-systemctl start slapd
-
-slapRootPassword="nUmZW75U"
-ldif="dn: olcDatabase={0}config,cn=config
-changetype: modify
-add: olcRootPW
-olcRootPW: $(slappasswd -s "$slapRootPassword")"
-echo "$ldif" | ldapadd -Y EXTERNAL -H ldapi:///
-
-ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/cosine.ldif
-ldapadd -Y EXTERNAL -H ldapi:/// -f /etc/openldap/schema/inetorgperson.ldif
-
-kcOrgRootPassword="PRGM93KP"
-suffix="dc=keycloak,dc=org"
-ldif="dn: olcDatabase=bdb,cn=config
-objectClass: olcDatabaseConfig
-objectClass: olcBdbConfig
-olcDatabase: bdb
-olcSuffix: dc=keycloak,dc=org
-olcDbDirectory: /var/lib/ldap/
-olcRootDN: cn=Manager,dc=keycloak,dc=org
-olcRootPW: $(slappasswd -s "$kcOrgRootPassword")
-olcDbIndex: objectClass eq
-olcDbIndex: cn,sn,uid pres,eq,sub
-olcAccess: to attrs=userPassword
-  by self write
-  by anonymous auth
-  by dn.base="cn=Admin,dc=keycloak,dc=org" write
-  by * none
-olcAccess: to *
-  by self write
-  by dn.base="cn=Admin,dc=keycloak,dc=org" write
-  by * read"
-echo "$ldif" | ldapadd -Y EXTERNAL -H ldapi:///
-
-
-curl -s \
-  https://raw.githubusercontent.com/keycloak/keycloak/40216b5e7d04c41a01dde67938cbdb27595122a4/examples/ldap/ldap-example-users.ldif \
-  2>&1 | ldapadd -x -D "cn=Manager,dc=keycloak,dc=org" -w "$kcOrgRootPassword" -H ldapi:///
-
-#check that it is there
-ldapsearch -x -D "cn=Manager,dc=keycloak,dc=org" -w "$kcOrgRootPassword" -H ldapi:/// -b ou=People,dc=keycloak,dc=org
-
-mkdir -p /etc/openldap/certs
-# An empty password for the NSS database
-echo > /etc/openldap/certs/password
-# Create the NSS database
-certutil -N -d /etc/openldap/certs -f /etc/openldap/certs/password
-
-# The openldap.local cert and key
-openssl pkcs12 -export \
-  -in ca/certs/openldap.local-cert.pem -inkey ca/private/openldap.local-key.pem \
-  -out /etc/openldap/certs/openldap.local.p12 -name "openldap.local" -nodes -passout pass:
-pk12util -i /etc/openldap/certs/openldap.local.p12 -d /etc/openldap/certs -k /etc/openldap/certs/password -w /etc/openldap/certs/password
-
-# Make sure the import was successful
-certutil -L -d /etc/openldap/certs -f /etc/openldap/certs/password
-
-certutil -A -d /etc/openldap/certs -f /etc/openldap/certs/password \
-  -n "ca.local" -t "CT,," -i ca/certs/ca.local-cert.pem
-# Make sure the import was successful
-certutil -L -d /etc/openldap/certs -f /etc/openldap/certs/password
-
-chown -R ldap:ldap /etc/openldap/certs/*
-
-ldif="dn: cn=config
-changetype: modify
-replace: olcTLSCertificateFile
-olcTLSCertificateFile: openldap.local
--
-replace: olcTLSVerifyClient
-olcTLSVerifyClient: never"
-echo "$ldif" | ldapmodify -Y EXTERNAL -H ldapi:///
-
-# note that we have set olcTLSVerifyClient: never for now
-
-systemctl restart slapd
-
-# eventually check if the slapd sends the cert
-openssl s_client -connect localhost:636 -CAfile ca/cacert.pem  -msg
-----
+* link:openldap.adoc[OpenLDAP]
+* link:389-ds.adoc[389 Directory Server]
 
 
 == Configure WildFly
@@ -109,11 +21,12 @@ openssl s_client -connect localhost:636 -CAfile ca/cacert.pem  -msg
 [source,sh]
 ----
 # as non-root
-cd JBEAP-4439
+cd  WFCORE-2647
+wfcore2647Dir="$(pwd)"
+caDir="${wfcore2647Dir}/ca"
+
 rm -Rf keytool/*
 mkdir -p keytool/tmp
-
-
 
 
 openssl x509 -outform der -in ca/certs/ca.local-cert.pem -out keytool/tmp/cacert.der
@@ -121,7 +34,7 @@ openssl x509 -outform der -in ca/certs/ca.local-cert.pem -out keytool/tmp/cacert
 #  -keystore keytool/keystore.jks -file keytool/tmp/cacert.der -storepass 123456
 keytool -import -noprompt -v -trustcacerts -alias ca.local \
   -keystore keytool/truststore.jks -file keytool/tmp/cacert.der -storepass 123456
-# make sure it is there
+# make the import was successful
 keytool -list -keystore keytool/truststore.jks -storepass 123456
 
 # openssl pkcs12 -export -in Certificates/client.crt -inkey Keys/client.key -certfile Certificates/RootCA.crt -out Certificates/clientCert.p12
@@ -134,7 +47,7 @@ openssl pkcs12 -export -in ca/certs/wildfly.local-cert.pem -inkey ca/private/wil
 
 keytool -importkeystore -srcstorepass 123456 -deststorepass 123456 -destkeystore keytool/keystore.jks \
   -srckeystore keytool/tmp/wildfly.local.p12 -srcstoretype PKCS12
-# make sure it is there
+# make the import was successful
 keytool -list -keystore keytool/keystore.jks -storepass 123456
 ----
 
