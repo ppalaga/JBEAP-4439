@@ -1,0 +1,32 @@
+[source,sh]
+----
+# as non-root
+cd  WFCORE-2647
+wfcore2647Dir="$(pwd)"
+caDir="${wfcore2647Dir}/ca"
+
+rm -Rf keytool/*
+mkdir -p keytool/tmp
+
+
+openssl x509 -outform der -in ca/certs/ca.local-cert.pem -out keytool/tmp/cacert.der
+#keytool -import -noprompt -v -trustcacerts -alias ca.local \
+#  -keystore keytool/keystore.jks -file keytool/tmp/cacert.der -storepass 123456
+keytool -import -noprompt -v -trustcacerts -alias ca.local \
+  -keystore keytool/truststore.jks -file keytool/tmp/cacert.der -storepass 123456
+# make the import was successful
+keytool -list -keystore keytool/truststore.jks -storepass 123456
+
+# openssl pkcs12 -export -in Certificates/client.crt -inkey Keys/client.key -certfile Certificates/RootCA.crt -out Certificates/clientCert.p12
+openssl pkcs12 -export -in ca/certs/wildfly.local-cert.pem -inkey ca/private/wildfly.local-key.pem \
+  -passout pass:123456 -name wildfly.local \
+  -certfile ca/certs/ca.local-cert.pem -out keytool/tmp/wildfly.local.p12
+
+# keytool -importkeystore -srckeystore client.keystore -destkeystore clientCert.p12 -srcstoretype PKCS12 -deststoretype PKCS12 -deststorepass keypassword
+
+
+keytool -importkeystore -srcstorepass 123456 -deststorepass 123456 -destkeystore keytool/keystore.jks \
+  -srckeystore keytool/tmp/wildfly.local.p12 -srcstoretype PKCS12
+# make the import was successful
+keytool -list -keystore keytool/keystore.jks -storepass 123456
+----

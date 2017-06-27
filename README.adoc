@@ -1,139 +1,19 @@
 = JBEAP-4439 alias WFCORE-2647 reproducer utilities
 
-== Setup the Certificate Authority (CA)
-
-Install OpenSSL and follow link:ca/README.adoc[ca/README.adoc]
-
-== Create a NSS store
-
-Follow link:nss.adoc[nss.adoc]
-
-== LDAP Servers
-
-Install and configure *one* of the LDAP Servers
-
-* link:openldap.adoc[OpenLDAP]
-* link:389-ds.adoc[389 Directory Server]
-
-
-== Configure WildFly
-
+* link:ca/README.adoc[Setup the Certificate Authority (CA)]
+* link:nss.adoc[Create a NSS store]
+* link:keytool.adoc[Create a store for WildFly in Java Keytool format]
+* Checkout the WildFly source tree
++
 [source,sh]
 ----
 # as non-root
 cd  WFCORE-2647
-wfcore2647Dir="$(pwd)"
-caDir="${wfcore2647Dir}/ca"
-
-rm -Rf keytool/*
-mkdir -p keytool/tmp
-
-
-openssl x509 -outform der -in ca/certs/ca.local-cert.pem -out keytool/tmp/cacert.der
-#keytool -import -noprompt -v -trustcacerts -alias ca.local \
-#  -keystore keytool/keystore.jks -file keytool/tmp/cacert.der -storepass 123456
-keytool -import -noprompt -v -trustcacerts -alias ca.local \
-  -keystore keytool/truststore.jks -file keytool/tmp/cacert.der -storepass 123456
-# make the import was successful
-keytool -list -keystore keytool/truststore.jks -storepass 123456
-
-# openssl pkcs12 -export -in Certificates/client.crt -inkey Keys/client.key -certfile Certificates/RootCA.crt -out Certificates/clientCert.p12
-openssl pkcs12 -export -in ca/certs/wildfly.local-cert.pem -inkey ca/private/wildfly.local-key.pem \
-  -passout pass:123456 -name wildfly.local \
-  -certfile ca/certs/ca.local-cert.pem -out keytool/tmp/wildfly.local.p12
-
-# keytool -importkeystore -srckeystore client.keystore -destkeystore clientCert.p12 -srcstoretype PKCS12 -deststoretype PKCS12 -deststorepass keypassword
-
-
-keytool -importkeystore -srcstorepass 123456 -deststorepass 123456 -destkeystore keytool/keystore.jks \
-  -srckeystore keytool/tmp/wildfly.local.p12 -srcstoretype PKCS12
-# make the import was successful
-keytool -list -keystore keytool/keystore.jks -storepass 123456
-----
-
-
-Frist check whether WF can auth with `olcTLSVerifyClient: never` that we have set in the OpenLDAP config above:
-
-[source,sh]
-----
-
-jbeap4439Dir="$(pwd)"
-
 git clone https://github.com/wildfly/wildfly.git
-cd wildfly
-# reset to a revision known to reproduce JBEAP-4439
-git reset --hard 70315eaba38d8be73a6154eac4ab5b8a326574c0
-mvn clean install -DskipTests -Denforcer.skip -Dcheckstyle-skip
-cd dist/target/wildfly-11.0.0.Beta1-SNAPSHOT
-
-cp -t standalone/configuration "${jbeap4439Dir}/wildfly-11.0.0.Beta1-SNAPSHOT-70315ea/standalone/configuration/standalone.xml"
-
-chmod +x bin/standalone.sh
-bin/standalone.sh
 ----
-
-Visit http://localhost:9990 in browser and log in with jbrown password. It should work. Stop WildFly.
-
-Now switch to `olcTLSVerifyClient: demand`
-
-[source,sh]
-----
-# as root
-ldif="dn: cn=config
-changetype: modify
-replace: olcTLSVerifyClient
-olcTLSVerifyClient: demand"
-echo "$ldif" | ldapmodify -Y EXTERNAL -H ldapi:///
-
-systemctl restart slapd
++
+* Reproduce with the individividual LDAP servers
+** link:openldap.adoc[OpenLDAP]
+** link:389-ds.adoc[389 Directory Server]
 
 
-openssl s_client -showcerts -connect localhost:636 -cert ca/certs/wildfly.local-cert.pem -key ca/private/wildfly.local-key.pem -CAfile ca/certs/ca.local-cert.pem
-----
-
-Start WildFly again
-
-[source,sh]
-----
-# as non-root
-bin/standalone.sh -Djavax.net.debug=ssl:handshake
-----
-
-Visit http://localhost:9990 in browser again and log in with jbrown password.
-
-Expected: jbrown password can log in.
-
-Actual: jbrown cannot log in. There are two occurences of `*** CertificateRequest` in the log. The first one is sending the client cert
-
-[source,sh]
-----
-INFO  [stdout] (management task-1) *** CertificateRequest
-INFO  [stdout] (management task-1) Cert Types: RSA, ECDSA, DSS
-INFO  [stdout] (management task-1) Supported Signature Algorithms: SHA256withECDSA, SHA384withECDSA, SHA512withECDSA, SHA1withECDSA, Unknown (hash:0x8, signature:0x4), Unknown (hash:0x8, signature:0x5), Unknown (hash:0x8, signature:0x6), SHA256withRSA, SHA384withRSA, SHA512withRSA, SHA1withRSA, SHA256withDSA, Unknown (hash:0x5, signature:0x2), Unknown (hash:0x6, signature:0x2), SHA1withDSA
-INFO  [stdout] (management task-1) Cert Authorities:
-INFO  [stdout] (management task-1) <CN=ca.local>
-INFO  [stdout] (management task-1) *** ServerHelloDone
-INFO  [stdout] (management task-1) Warning: no suitable certificate found - continuing without client authentication
-INFO  [stdout] (management task-1) *** Certificate chain
-INFO  [stdout] (management task-1) <Empty>
-INFO  [stdout] (management task-1) ***
-----
-
-but the second one is apparently not sending the client cert and hence the OpenLDAP server does not accept the request and
-the user `jbrown` is left unauthenticated:
-
-[source,sh]
-----
-*** CertificateRequest
-INFO  [stdout] (Thread-78) Cert Types: RSA, ECDSA, DSS
-INFO  [stdout] (Thread-78) Supported Signature Algorithms: SHA256withECDSA, SHA384withECDSA, SHA512withECDSA, SHA1withECDSA, Unknown (hash:0x8, signature:0x4), Unknown (hash:0x8, signature:0x5), Unknown (hash:0x8, signature:0x6), SHA256withRSA, SHA384withRSA, SHA512withRSA, SHA1withRSA, SHA256withDSA, Unknown (hash:0x5, signature:0x2), Unknown (hash:0x6, signature:0x2), SHA1withDSA
-INFO  [stdout] (Thread-78) Cert Authorities:
-INFO  [stdout] (Thread-78) <CN=ca.local>
-INFO  [stdout] (Thread-78) *** ServerHelloDone
-INFO  [stdout] (Thread-78) matching alias: wildfly.local
-INFO  [stdout] (Thread-78) *** Certificate chain
-INFO  [stdout] (Thread-78) chain [0] = [
-INFO  [stdout] (Thread-78) [
-...
-INFO  [stdout] (management task-1) management task-1, RECV TLSv1.2 ALERT:  fatal, bad_certificate
-----

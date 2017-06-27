@@ -1,0 +1,36 @@
+= Import the certificates from ../ca to a new NSS store
+
+Note that OpenLDAP and 389 DS use link:https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS[NSS] rather than OpenSSL.
+NSS has its own store format.
+
+[source,sh]
+----
+cd WFCORE-2647
+wfcore2647Dir="$(pwd)"
+nssStoreDir="${wfcore2647Dir}/nss-store"
+
+# Make sure you initalized the ca as described in link:../ca/README.adoc
+caDir="${wfcore2647Dir}/ca"
+
+# Optionally clean the previous attempts
+rm -Rf "${nssStoreDir}"
+mkdir "${nssStoreDir}"
+
+# An empty password for the NSS database
+echo > "${nssStoreDir}/password"
+# Create the NSS database
+certutil -N -d "${nssStoreDir}" -f "${nssStoreDir}/password"
+
+# The openldap.local cert and key
+openssl pkcs12 -export \
+  -in "${caDir}/certs/openldap.local-cert.pem" -inkey "${caDir}/private/openldap.local-key.pem" \
+  -out "${nssStoreDir}/openldap.local.p12" -name "openldap.local" -nodes -passout pass:
+pk12util -i "${nssStoreDir}/openldap.local.p12" -d "${nssStoreDir}" -k "${nssStoreDir}/password" -w "${nssStoreDir}/password"
+
+# Make sure the import was successful
+certutil -L -d "${nssStoreDir}" -f "${nssStoreDir}/password"
+
+certutil -A -d "${nssStoreDir}" -f "${nssStoreDir}/password" \
+  -n "ca.local" -t "CT,," -i "${caDir}/certs/ca.local-cert.pem"
+# Make sure the import was successful
+certutil -L -d "${nssStoreDir}" -f "${nssStoreDir}/password"

@@ -1,0 +1,304 @@
+== Install and configure 389 Directory Server
+
+On a CentOS 7 box as root:
+
+[source,sh]
+----
+cd WFCORE-2647
+wfcore2647Dir="$(pwd)"
+nssStoreDir="${wfcore2647Dir}/nss-store"
+
+# Add the EPEL repo
+yum install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+
+# Optionally clean the previous attempts
+systemctl stop dirsrv.target
+rm -Rf /etc/dirsrv
+rm -Rf /var/lock/dirsrv
+rm -Rf /var/lib/dirsrv/
+
+yum -y remove 389-ds openldap-clients
+
+# Install the DS
+yum -y install 389-ds openldap-clients
+
+
+host="osboxes"
+domain="mylocaldomain"
+fqdn="${host}.${domain}"
+rootDNPwd="nUmZW75U"
+
+# 389-ds is picky about having FQDN setup properly
+hostnamectl set-hostname "${fqdn}"
+hostname -s
+# should return what we have in ${host}
+hostname -d
+# should return what we have in ${domain}
+
+# Prepare the init file:
+
+echo "[General]
+FullMachineName= ${fqdn}
+SuiteSpotUserID= nobody
+SuiteSpotGroup= nobody
+AdminDomain= ${domain}
+ConfigDirectoryAdminID= admin
+ConfigDirectoryAdminPwd= admin
+ConfigDirectoryLdapURL= ldap://${fqdn}:389/o=NetscapeRoot
+
+[slapd]
+SlapdConfigForMC= Yes
+UseExistingMC= No
+ServerPort= 389
+ServerIdentifier= ${host}
+Suffix= dc=keycloak,dc=org
+RootDN= cn=Directory Manager
+RootDNPwd= ${rootDNPwd}
+
+[admin]
+Port= 9830
+ServerIpAddress= 0.0.0.0
+ServerAdminID= admin
+ServerAdminPwd= admin" > /tmp/389-init.inf
+
+setup-ds-admin.pl -s -f /tmp/389-init.inf
+
+systemctl enable dirsrv.target
+systemctl enable dirsrv-admin
+
+
+firewall-cmd --permanent --add-port=389/tcp
+firewall-cmd --permanent --add-port=636/tcp
+firewall-cmd --permanent --add-port=9830/tcp
+firewall-cmd --reload
+
+# switch to ipv4
+ldif="dn: cn=config
+changetype: modify
+replace: nsslapd-listenhost
+nsslapd-listenhost: 0.0.0.0"
+echo "$ldif" | ldapmodify -a -x -h localhost -p 389 -D cn="Directory Manager" -w ${rootDNPwd}
+systemctl restart dirsrv.target
+netstat -tulpen | grep 389
+# should return tcp        0      0 0.0.0.0:389             0.0.0.0:*               LISTEN      0          86293      15322/ns-slapd
+
+
+# Import users
+echo "
+dn: ou=RealmRoles,dc=keycloak,dc=org
+objectclass: top
+objectclass: organizationalUnit
+ou: RealmRoles
+
+dn: ou=FinanceRoles,dc=keycloak,dc=org
+objectclass: top
+objectclass: organizationalUnit
+ou: FinanceRoles
+
+dn: uid=jbrown,ou=People,dc=keycloak,dc=org
+objectclass: top
+objectclass: person
+objectclass: organizationalPerson
+objectclass: inetOrgPerson
+uid: jbrown
+cn: James
+sn: Brown
+mail: jbrown@keycloak.org
+postalCode: 88441
+userPassword: password
+
+dn: uid=bwilson,ou=People,dc=keycloak,dc=org
+objectclass: top
+objectclass: person
+objectclass: organizationalPerson
+objectclass: inetOrgPerson
+uid: bwilson
+cn: Bruce
+sn: Wilson
+mail: bwilson@keycloak.org
+postalCode: 88441
+postalCode: 77332
+postalCode: 66221
+street: Elm 5
+userPassword: password
+
+dn: cn=ldap-user,ou=RealmRoles,dc=keycloak,dc=org
+objectclass: top
+objectclass: groupOfNames
+cn: ldap-user
+member: uid=jbrown,ou=People,dc=keycloak,dc=org
+member: uid=bwilson,ou=People,dc=keycloak,dc=org
+
+dn: cn=ldap-admin,ou=RealmRoles,dc=keycloak,dc=org
+objectclass: top
+objectclass: groupOfNames
+cn: ldap-admin
+member: uid=jbrown,ou=People,dc=keycloak,dc=org
+
+dn: cn=accountant,ou=FinanceRoles,dc=keycloak,dc=org
+objectclass: top
+objectclass: groupOfNames
+cn: accountant
+member: uid=bwilson,ou=People,dc=keycloak,dc=org
+" \
+ | ldapadd -a -x -h localhost -p 389 -D cn="Directory Manager" -w ${rootDNPwd}
+
+
+
+# Enable SSL
+
+yes | cp -Rf -t "/etc/dirsrv/slapd-${host}" "${nssStoreDir}/"*
+
+chown -R nobody:nobody "/etc/dirsrv/slapd-${host}"/*
+echo "Internal (Software) Token:" > "/etc/dirsrv/slapd-${host}/pin.txt"
+chmod 0400 "/etc/dirsrv/slapd-${host}/pin.txt"
+
+ldif="
+dn: cn=config
+changetype: modify
+add: nsslapd-security
+nsslapd-security: on
+-
+replace: nsslapd-ssl-check-hostname
+nsslapd-ssl-check-hostname: off
+-
+replace: nsslapd-secureport
+nsslapd-secureport: 636
+-
+add: nsslapd-securelistenhost
+nsslapd-securelistenhost: 0.0.0.0"
+echo "$ldif" | ldapmodify -a -x -h localhost -p 389 -D cn="Directory Manager" -w ${rootDNPwd}
+
+ldif="dn: cn=RSA,cn=encryption,cn=config
+changetype: add
+objectclass: top
+objectclass: nsEncryptionModule
+cn: RSA
+nsSSLPersonalitySSL: openldap.local
+nsSSLToken: internal (software)
+nsSSLActivation: on"
+echo "$ldif" | ldapmodify -a -x -h localhost -p 389 -D cn="Directory Manager" -w ${rootDNPwd}
+
+systemctl restart dirsrv.target
+
+
+# make sure nsSSLClientAuth is allowed
+ldapsearch -p 389 -D "cn=directory manager" -w password -s sub -b "cn=encryption,cn=config" -h localhost -w ${rootDNPwd} "(objectclass=*)" nsSSLClientAuth
+# Should return nsSSLClientAuth: allowed
+
+# eventually check if the slapd sends the cert
+openssl s_client -connect localhost:636 -CAfile "${wfcore2647Dir}/ca/certs/ca.local-cert.pem"  -msg
+
+----
+
+
+== Configure WildFly
+
+=== `nsSSLClientAuth: allowed`
+
+Frist check whether WF can auth with `nsSSLClientAuth: allowed` that we have set in the 389 DS config above:
+
+[source,sh]
+----
+
+cd  WFCORE-2647
+wfcore2647Dir="$(pwd)"
+
+cd wildfly
+git fetch origin
+# reset to a revision known to reproduce WFCORE-2647
+rev="70315ea"
+git reset --hard "${rev}"
+mvn clean install -DskipTests -Denforcer.skip -Dcheckstyle.skip
+
+rm -Rf "${wfcore2647Dir}/wildfly-run"
+mkdir "${wfcore2647Dir}/wildfly-run"
+cp -R -t "${wfcore2647Dir}/wildfly-run" dist/target/wildfly-*/*
+
+cp -t "${wfcore2647Dir}/wildfly-run/standalone/configuration" "${wfcore2647Dir}/389-ds/${rev}-standalone.xml"
+
+cd "${wfcore2647Dir}/wildfly-run"
+chmod +x bin/standalone.sh
+bin/standalone.sh
+----
+
+Visit http://localhost:9990 in browser and log in with jbrown password. It should work. Stop WildFly.
+
+
+=== `nsSSLClientAuth: off`
+
+Then check whether WF can auth with `nsSSLClientAuth: off`:
+
+[source,sh]
+----
+# as root on the 389 box
+cd WFCORE-2647
+wfcore2647Dir="$(pwd)"
+
+ldif="
+dn: cn=encryption,cn=config
+changetype: modify
+replace: nsSSLClientAuth
+nsSSLClientAuth: off"
+echo "$ldif" | ldapmodify -a -x -h localhost -p 389 -D cn="Directory Manager" -w ${rootDNPwd}
+
+systemctl restart dirsrv.target
+
+----
+
+Start WildFly in `wildfly-run` folder and visit http://localhost:9990 in browser and log in with jbrown password. It should still work. Stop WildFly.
+
+
+=== `nsSSLClientAuth: required`
+
+Now reproduce the actuall WFCORE-2647.
+
+
+[source,sh]
+----
+cd WFCORE-2647
+wfcore2647Dir="$(pwd)"
+
+ldif="
+dn: cn=encryption,cn=config
+changetype: modify
+replace: nsSSLClientAuth
+nsSSLClientAuth: required"
+echo "$ldif" | ldapmodify -a -x -h localhost -p 389 -D cn="Directory Manager" -w ${rootDNPwd}
+
+systemctl restart dirsrv.target
+
+----
+
+Start WildFly in `wildfly-run` folder and visit http://localhost:9990 in browser and log in with jbrown password. It should *not* work. Stop WildFly.
+
+
+== Verify that the fix works, still with `nsSSLClientAuth: required`
+
+Upgrade the container to a version that contains the WFCORE-2647 fix
+
+[source,sh]
+----
+
+cd  WFCORE-2647
+wfcore2647Dir="$(pwd)"
+
+cd wildfly
+git fetch origin
+# reset to a revision known to reproduce WFCORE-2647
+rev="a542015"
+git reset --hard "${rev}"
+mvn clean install -DskipTests -Denforcer.skip -Dcheckstyle.skip
+
+rm -Rf "${wfcore2647Dir}/wildfly-run"
+mkdir "${wfcore2647Dir}/wildfly-run"
+cp -R -t "${wfcore2647Dir}/wildfly-run" dist/target/wildfly-*/*
+
+cp -t "${wfcore2647Dir}/wildfly-run/standalone/configuration" "${wfcore2647Dir}/389-ds/${rev}-standalone.xml"
+
+cd "${wfcore2647Dir}/wildfly-run"
+chmod +x bin/standalone.sh
+bin/standalone.sh
+----
+
+Visit http://localhost:9990 in browser and log in with jbrown password. It should work. Stop WildFly.

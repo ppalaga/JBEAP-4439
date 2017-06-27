@@ -27,3 +27,6 @@ nb-configuration.xml
 
 # OSX
 .DS_Store
+
+/wildfly-run/
+/wildfly/

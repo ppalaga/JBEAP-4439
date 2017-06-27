@@ -31,6 +31,9 @@
         <extension module="org.wildfly.extension.security.manager"/>
         <extension module="org.wildfly.extension.undertow"/>
     </extensions>
+    <system-properties>
+        <property name="ldap.server.url" value="ldaps://localhost:636"/>
+    </system-properties>
     <management>
         <security-realms>
             <security-realm name="ManagementRealm">
@@ -60,10 +63,11 @@
                     <properties path="application-roles.properties" relative-to="jboss.server.config.dir"/>
                 </authorization>
             </security-realm>
+
         </security-realms>
 
         <outbound-connections>
-            <ldap name="LocalLdap" url="ldaps://localhost:636" security-realm="ManagementRealm" search-dn="cn=Manager,dc=keycloak,dc=org" search-credential="PRGM93KP" />
+            <ldap name="LocalLdap" url="${ldap.server.url}" security-realm="ManagementRealm" search-dn="cn=Directory Manager" search-credential="nUmZW75U" always-send-client-cert="true" />
         </outbound-connections>
 
         <audit-log>
@@ -483,6 +487,7 @@
                     <location name="/" handler="welcome-content"/>
                     <filter-ref name="server-header"/>
                     <filter-ref name="x-powered-by-header"/>
+                    <http-invoker security-realm="ApplicationRealm"/>
                 </host>
             </server>
             <servlet-container name="default">
@@ -493,7 +498,7 @@
                 <file name="welcome-content" path="${jboss.home.dir}/welcome-content"/>
             </handlers>
             <filters>
-                <response-header name="server-header" header-name="Server" header-value="JBoss-EAP/7"/>
+                <response-header name="server-header" header-name="Server" header-value="WildFly/10"/>
                 <response-header name="x-powered-by-header" header-name="X-Powered-By" header-value="Undertow/1"/>
             </filters>
         </subsystem>
