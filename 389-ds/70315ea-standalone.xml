@@ -31,9 +31,6 @@
         <extension module="org.wildfly.extension.security.manager"/>
         <extension module="org.wildfly.extension.undertow"/>
     </extensions>
-    <system-properties>
-        <property name="ldap.server.url" value="ldaps://localhost:636"/>
-    </system-properties>
     <management>
         <security-realms>
             <security-realm name="ManagementRealm">
@@ -67,7 +64,7 @@
         </security-realms>
 
         <outbound-connections>
-            <ldap name="LocalLdap" url="${ldap.server.url}" security-realm="ManagementRealm" search-dn="cn=Directory Manager" search-credential="nUmZW75U" />
+            <ldap name="LocalLdap" url="${ldap.server.url:ldaps://localhost:636}" security-realm="ManagementRealm" search-dn="cn=Directory Manager" search-credential="nUmZW75U" />
         </outbound-connections>
 
         <audit-log>

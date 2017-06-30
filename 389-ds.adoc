@@ -215,7 +215,7 @@ rm -Rf "${wfcore2647Dir}/wildfly-run"
 mkdir "${wfcore2647Dir}/wildfly-run"
 cp -R -t "${wfcore2647Dir}/wildfly-run" dist/target/wildfly-*/*
 
-cp -t "${wfcore2647Dir}/wildfly-run/standalone/configuration" "${wfcore2647Dir}/389-ds/${rev}-standalone.xml"
+cp "${wfcore2647Dir}/389-ds/${rev}-standalone.xml" "${wfcore2647Dir}/wildfly-run/standalone/configuration/standalone.xml"
 
 cd "${wfcore2647Dir}/wildfly-run"
 chmod +x bin/standalone.sh
@@ -285,7 +285,7 @@ wfcore2647Dir="$(pwd)"
 
 cd wildfly
 git fetch origin
-# reset to a revision known to reproduce WFCORE-2647
+# reset to a revision where WFCORE-2647 is fixed
 rev="a542015"
 git reset --hard "${rev}"
 mvn clean install -DskipTests -Denforcer.skip -Dcheckstyle.skip
@@ -294,11 +294,17 @@ rm -Rf "${wfcore2647Dir}/wildfly-run"
 mkdir "${wfcore2647Dir}/wildfly-run"
 cp -R -t "${wfcore2647Dir}/wildfly-run" dist/target/wildfly-*/*
 
-cp -t "${wfcore2647Dir}/wildfly-run/standalone/configuration" "${wfcore2647Dir}/389-ds/${rev}-standalone.xml"
+cp "${wfcore2647Dir}/389-ds/${rev}-standalone.xml" "${wfcore2647Dir}/wildfly-run/standalone/configuration/standalone.xml"
 
 cd "${wfcore2647Dir}/wildfly-run"
 chmod +x bin/standalone.sh
 bin/standalone.sh
 ----
 
-Visit http://localhost:9990 in browser and log in with jbrown password. It should work. Stop WildFly.
+Visit http://localhost:9990 in browser:
+
+* Log in with jbrown password. It should work.
+* Also make sure the LDAP server does not understand the client cert as complete credentials. While we send a trusted client
+  cert and we log in with incorrect password, the auth should fail. Hence log in with jbrown blah and it should not work.
+
+Stop WildFly.
